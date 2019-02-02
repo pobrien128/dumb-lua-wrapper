@@ -9,6 +9,7 @@
 #include <iostream>
 #include <map>
 #include <sstream>
+#include <memory>
 
 //C
 #include <cstring>
@@ -20,12 +21,9 @@ class LuaFunction;
 class LuaStateWrapper;
 union LuaTypeUnion
 {
-    char* s;
     float f;
     double d;
     int i;
-    LuaTable* t;
-    LuaFunction* func;
 };
 
 enum class LuaDatatype
@@ -79,6 +77,8 @@ class LuaFunction
         {
         }
 
+        ~LuaFunction();
+
         int get_reference(){
             return m_ref;
         }
@@ -124,25 +124,23 @@ class LuaType
             type = LuaDatatype::lua_int;
         }
 
-        LuaType(const std::string& s)
+        LuaType(const std::string& _s)
         {
-            data.s = strdup(s.c_str()); 
-            str_len = strlen(data.s);
+            s = _s; 
             type = LuaDatatype::lua_string;
         }
 
-        LuaType(const char* s)
+        LuaType(const char* _s)
         {
-            data.s = strdup(s);
-            str_len = strlen(data.s);
+            s = std::string(_s);
             type = LuaDatatype::lua_string;
         }
 
-        LuaType(const LuaTable& t);
+        LuaType(std::shared_ptr<LuaTable> t);
 
-        LuaType(const LuaFunction& f)
+        LuaType(std::shared_ptr<LuaFunction> f)
         {
-            data.func = new LuaFunction(f);
+            func=f;
             type = LuaDatatype::lua_function;
         }
 
@@ -188,9 +186,7 @@ class LuaType
         operator std::string() const {
             if(type == LuaDatatype::lua_string)
             {
-                std::string ret(data.s, str_len);
-                std::cout << "String conversion operator: " << ret << std::endl;
-                return ret;
+                return s;
             } else if (type == LuaDatatype::lua_int) {
                 return std::to_string(data.i);
             } else if (type == LuaDatatype::lua_float) {
@@ -198,9 +194,9 @@ class LuaType
             } else if (type == LuaDatatype::lua_double) {
                 return std::to_string(data.d);
             } else if (type == LuaDatatype::lua_table) {
-                return to_string(*data.t);
+                return to_string(*t);
             } else if (type == LuaDatatype::lua_function) {
-                return std::to_string(data.func->get_reference());
+                return std::to_string(func->get_reference());
             }
         }
 
@@ -209,7 +205,7 @@ class LuaType
             streamer << to_string(type);
             switch(type){
                 case LuaDatatype::lua_string:
-                    streamer << data.s;
+                    streamer << s;
                     break;
                 case LuaDatatype::lua_int:
                     streamer << data.i;
@@ -221,10 +217,10 @@ class LuaType
                     streamer << data.d;
                     break;
                 case LuaDatatype::lua_table:
-                    streamer << to_string(*data.t);
+                    streamer << to_string(*t);
                     break;
                 case LuaDatatype::lua_function:
-                    streamer << data.func->get_reference();
+                    streamer << func->get_reference();
                     break;
             }
             return streamer.str();
@@ -245,10 +241,6 @@ class LuaType
 
         operator LuaTable() const;
 
-        size_t get_strlen() const {
-            return str_len;
-        }
-
         LuaDatatype get_type(){
             return type;
         }
@@ -257,7 +249,7 @@ class LuaType
         {
             std::cout << "Expecting function type, have type: " << to_string(type) << std::endl;
             assert(type == LuaDatatype::lua_function);
-            data.func->call(numRetValues);
+            func->call(numRetValues);
         }
 
         template < typename ...Types > 
@@ -265,14 +257,15 @@ class LuaType
         {
             std::cout << "Expecting function type, have type: " << to_string(type) << std::endl;
             assert(type == LuaDatatype::lua_function);
-            data.func->call(numRetValues, args...);
+            func->call(numRetValues, args...);
         }
 
     private:
         LuaTypeUnion data;
+        std::string s;
+        std::shared_ptr<LuaTable> t;
+        std::shared_ptr<LuaFunction> func;
         LuaDatatype type;
-
-        size_t str_len;
 
 };
 
@@ -371,6 +364,11 @@ class LuaStateWrapper
             lua_register( m_luaState, luaFuncName.c_str(), f);
         }
 
+        void removeReferenceFromRegistry(const int& ref){
+            std::cout << "Removing reference: " << ref << " from lua registry." << std::endl;;
+            luaL_unref(m_luaState, LUA_REGISTRYINDEX, ref);
+        }
+
         int getNumItemsOnStack()
         {
            return lua_gettop(m_luaState);
@@ -449,12 +447,12 @@ class LuaStateWrapper
             } 
             else if (lua_istable(m_luaState, -1)){
                 std::cout << "Reading in a table!" << std::endl;
-                LuaTable t;
+                std::shared_ptr<LuaTable> t;
                 _getReturnValue(t);
                 retVal = t;
             } else if (lua_isfunction(m_luaState, -1)){
                 std::cout << "Reading in a function!" << std::endl;
-                LuaFunction f;
+                std::shared_ptr<LuaFunction> f;
                 _getReturnValue(f);
                 retVal = f;
             }
@@ -485,9 +483,10 @@ class LuaStateWrapper
             retVal = std::string(cstr, len);
         }
 
-        void _getReturnValue(LuaTable& t)
+        void _getReturnValue(std::shared_ptr<LuaTable>& t)
         {
             assert(lua_istable(m_luaState, -1)); 
+            t.reset(new LuaTable);
             lua_pushnil(m_luaState);
             while( lua_next(m_luaState, -2))
             {
@@ -498,17 +497,16 @@ class LuaStateWrapper
                 lua_pop(m_luaState,1);
                 _getReturnValue(value);
                 lua_pop(m_luaState,1);
-                t[key] = value;
+                (*t)[key] = value;
             }
         }
 
-        void _getReturnValue(LuaFunction& f)
+        void _getReturnValue(std::shared_ptr<LuaFunction>& f)
         {
             assert(lua_isfunction(m_luaState, -1));
             lua_pushvalue(m_luaState, -1);
             int ref = luaL_ref(m_luaState, LUA_REGISTRYINDEX);
-            LuaFunction thisFunc(this, ref);
-            f = thisFunc;
+            f.reset(new LuaFunction(this, ref));
         }
 
         template< typename T, typename... Types >
@@ -568,6 +566,11 @@ void LuaFunction::call(const int& numRetValues)
     m_luaState->callFunction(m_ref, numRetValues);
 }
 
+LuaFunction::~LuaFunction()
+{
+    m_luaState->removeReferenceFromRegistry(m_ref);
+}
+
 
 //LuaType Definitions
 LuaType::LuaType(const LuaType& rtype)
@@ -585,14 +588,13 @@ LuaType::LuaType(const LuaType& rtype)
             data.i = rtype.data.i;
             break;
         case LuaDatatype::lua_string:
-            data.s = strdup(rtype.data.s);
-            str_len = rtype.get_strlen();
+            s = rtype.s;
             break;
         case LuaDatatype::lua_table:
-            data.t = new LuaTable(*rtype.data.t);
+            t = rtype.t;
             break;
         case LuaDatatype::lua_function:
-            data.func = new LuaFunction(*rtype.data.func);
+            func = rtype.func;
             break;
     }
 }
@@ -612,39 +614,31 @@ LuaType& LuaType::operator=(const LuaType& rtype)
             data.i = rtype.data.i;
             break;
         case LuaDatatype::lua_string:
-            data.s = strdup(rtype.data.s);
-            str_len = rtype.get_strlen();
+            s = rtype.s;
             break;
         case LuaDatatype::lua_table:
-            data.t = new LuaTable(*rtype.data.t);
+            t = rtype.t;
             break;
         case LuaDatatype::lua_function:
-            data.func = new LuaFunction(*rtype.data.func);
+            func = rtype.func;
             break;
     }
     return *this;
 }
 
-LuaType::LuaType(const LuaTable& t)
+LuaType::LuaType(std::shared_ptr<LuaTable> _t)
 {
-    data.t = new LuaTable(t);
+    t=_t;
     type = LuaDatatype::lua_table;
 }
 
 LuaType::~LuaType(){
-    if(type == LuaDatatype::lua_string){
-        std::cout << "Calling destructor: " << data.s << std::endl;
-        delete[] data.s;
-    } else if (type == LuaDatatype::lua_table){
-        delete data.t;
-    } else if (type == LuaDatatype::lua_function){
-        delete data.func;
-    }
 }
+
 LuaType::operator LuaTable() const 
 {
     assert(type == LuaDatatype::lua_table);
-    return *data.t;
+    return *t;
 }
 };
 
