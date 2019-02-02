@@ -29,8 +29,8 @@ int main(int argc, char** argv){
     std::cout << "Num Items remaining on stack: " <<
                 luaState.getNumItemsOnStack() << std::endl;
 
-    int result = luaState.getReturnValue<int>();
-    std::cout << "Result: " << result << std::endl;
+    lua_wrapper::LuaTable result = luaState.getReturnValue();
+    //std::cout << "Result: " << result << std::endl;
 
     std::cout << "Num Items remaining on stack: " <<
                 luaState.getNumItemsOnStack() << std::endl;
@@ -42,6 +42,22 @@ int main(int argc, char** argv){
     std::cout << "Num Items remaining on stack: " <<
                 luaState.getNumItemsOnStack() << std::endl;
     std::cout << "Type of item on stack: " << luaState.getTopStackItemType() << std::endl;
+
+    lua_wrapper::LuaTable table;
+    table["foo"] = 1;
+    table[1] = "bar";
+    table[3.0] = 4;
+
+    std::cout << "DUMP LUA TABLE" << std::endl;
+    for(auto i = std::cbegin(result); i != std::cend(result); i++)
+    {
+        lua_wrapper::LuaType key = i->first;
+        lua_wrapper::LuaType value = i->second;
+        std::string key_string = key;
+        std::string value_string = value;
+        std::string value_type = lua_wrapper::to_string(value.get_type());
+        std::cout << "TYPE: " << value_type << " KEY: " << key_string << " VAL: " << value_string << std::endl;;
+    }
 
     return 0;
 }
