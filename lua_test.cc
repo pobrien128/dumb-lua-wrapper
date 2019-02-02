@@ -64,7 +64,7 @@ int main(int argc, char** argv){
 
     auto test = result.get("notakey");
 
-    result["func"].call(1,4);
+    result["func"].call(1,6);
     int retVal = luaState.getReturnValue();
     std::cout << "Got a RET VALUE OF: " << retVal << std::endl;
 

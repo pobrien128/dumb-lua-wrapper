@@ -511,19 +511,21 @@ class LuaStateWrapper
             f = thisFunc;
         }
 
-
         template< typename T, typename... Types >
         void pushArgument(T t, Types... args )
         {
             pushArgument(t);
             pushArgument(args...);
         }
-
         void pushArgument(const int& arg){
             m_numArgs++;
             lua_pushnumber(m_luaState, arg);
         }
         void pushArgument(const float& arg){
+            m_numArgs++;
+            lua_pushnumber(m_luaState, arg);
+        }
+        void pushArgument(const double& arg){
             m_numArgs++;
             lua_pushnumber(m_luaState, arg);
         }
