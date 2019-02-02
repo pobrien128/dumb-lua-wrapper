@@ -18,7 +18,7 @@ function mymath.fact(n)
     table[3][0] = 100
     table[3][1] = {}
     table[3][1]["meow"] = "woof"
-    table[10] = mymath.dofact
+    table["func"] = mymath.dofact
     print(table)
 
     return table
