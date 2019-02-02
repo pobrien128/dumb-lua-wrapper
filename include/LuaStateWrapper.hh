@@ -16,6 +16,8 @@ namespace lua_wrapper
 {
 
 class LuaTable;
+class LuaFunction;
+class LuaStateWrapper;
 union LuaTypeUnion
 {
     char* s;
@@ -23,6 +25,7 @@ union LuaTypeUnion
     double d;
     int i;
     LuaTable* t;
+    LuaFunction* func;
 };
 
 enum class LuaDatatype
@@ -32,6 +35,7 @@ enum class LuaDatatype
     lua_int,
     lua_string,
     lua_table,
+    lua_function,
     lua_undefined
 };
 
@@ -54,6 +58,9 @@ static std::string to_string(LuaDatatype type){
         case LuaDatatype::lua_table:
             return "Table";
             break;
+        case LuaDatatype::lua_function:
+            return "Lua Function";
+            break;
         default:
             return "Undefined";
     }
@@ -62,6 +69,31 @@ static std::string to_string(LuaDatatype type){
 class LuaType;
 class LuaTable: public std::map<LuaType, LuaType>
 {
+
+};
+
+class LuaFunction
+{
+    public:
+        LuaFunction()
+        {}
+
+        LuaFunction(LuaStateWrapper* l, int ref)
+            :   m_luaState(l)
+            ,   m_ref(ref)
+        {
+        }
+
+        int get_reference(){
+            return m_ref;
+        }
+
+        template < typename ...Types >
+        void call(const int& numRetValues, Types ... args);
+
+    private:
+        LuaStateWrapper* m_luaState;
+        int m_ref;
 
 };
 
@@ -94,6 +126,9 @@ class LuaType
                 case LuaDatatype::lua_table:
                     data.t = new LuaTable(*rtype.data.t);
                     break;
+                case LuaDatatype::lua_function:
+                    data.func = new LuaFunction(*rtype.data.func);
+                    break;
             }
         }
 
@@ -117,6 +152,9 @@ class LuaType
                     break;
                 case LuaDatatype::lua_table:
                     data.t = new LuaTable(*rtype.data.t);
+                    break;
+                case LuaDatatype::lua_function:
+                    data.func = new LuaFunction(*rtype.data.func);
                     break;
             }
             return *this;
@@ -160,12 +198,20 @@ class LuaType
             type = LuaDatatype::lua_table;
         }
 
+        LuaType(const LuaFunction& f)
+        {
+            data.func = new LuaFunction(f);
+            type = LuaDatatype::lua_function;
+        }
+
         ~LuaType(){
             if(type == LuaDatatype::lua_string){
                 std::cout << "Calling destructor: " << data.s << std::endl;
                 delete[] data.s;
             } else if (type == LuaDatatype::lua_table){
                 delete data.t;
+            } else if (type == LuaDatatype::lua_function){
+                delete data.func;
             }
         }
 
@@ -215,6 +261,8 @@ class LuaType
                 return std::to_string(data.d);
             } else if (type == LuaDatatype::lua_table) {
                 return to_string(*data.t);
+            } else if (type == LuaDatatype::lua_function) {
+                return std::to_string(data.func->get_reference());
             }
         }
 
@@ -242,6 +290,14 @@ class LuaType
 
         LuaDatatype get_type(){
             return type;
+        }
+
+        template < typename ...Types > 
+        void call(const int& numRetValues, Types ... args)
+        {
+            std::cout << "Expecting function type, have type: " << to_string(type) << std::endl;
+            assert(type == LuaDatatype::lua_function);
+            data.func->call(numRetValues, args...);
         }
 
     private:
@@ -308,6 +364,21 @@ class LuaStateWrapper
             lua_getfield(m_luaState, -1, funcName.c_str());
             lua_call(m_luaState, 0, numRetValues); 
         }
+
+        template < typename ...Types >
+        void callFunction(const int& reference, const int& numRetValues, Types ... args)
+        {
+           lua_rawgeti(m_luaState, LUA_REGISTRYINDEX, reference); 
+           pushArguments(args...);
+           lua_call(m_luaState, m_numArgs, numRetValues);
+           m_numArgs = 0;
+        }
+
+        void callfunction(const int& reference, const int& numRetValues)
+        {
+            lua_rawgeti(m_luaState, LUA_REGISTRYINDEX, reference);
+            lua_call(m_luaState, 0, numRetValues);
+        }
         
         LuaType getReturnValue()
         {
@@ -354,6 +425,12 @@ class LuaStateWrapper
            return retVal;
         }
 
+        template< typename ...Types >
+        void pushArguments(Types ... args)
+        {
+            pushArgument(args...);
+        }
+
     private:
 
         void _getArgument(int& retVal)
@@ -396,6 +473,11 @@ class LuaStateWrapper
                 LuaTable t;
                 _getReturnValue(t);
                 retVal = t;
+            } else if (lua_isfunction(m_luaState, -1)){
+                std::cout << "Reading in a function!" << std::endl;
+                LuaFunction f;
+                _getReturnValue(f);
+                retVal = f;
             }
         }
 
@@ -441,11 +523,15 @@ class LuaStateWrapper
             }
         }
 
-        template< typename ...Types >
-        void pushArguments(Types ... args)
+        void _getReturnValue(LuaFunction& f)
         {
-            pushArgument(args...);
+            assert(lua_isfunction(m_luaState, -1));
+            lua_pushvalue(m_luaState, -1);
+            int ref = luaL_ref(m_luaState, LUA_REGISTRYINDEX);
+            LuaFunction thisFunc(this, ref);
+            f = thisFunc;
         }
+
 
         template< typename T, typename... Types >
         void pushArgument(T t, Types... args )
@@ -487,6 +573,11 @@ static std::string to_string(const LuaTable& table){
     sstream << "}";
     return sstream.str();
 };
+
+template < typename ...Types > void LuaFunction::call(const int& numRetValues, Types ... args)
+{
+    m_luaState->callFunction(m_ref, numRetValues, args...);
+}
 
 };
 

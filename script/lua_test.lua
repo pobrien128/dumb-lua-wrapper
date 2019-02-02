@@ -1,6 +1,7 @@
 local mymath = {}
 
 function mymath.dofact(n)
+    print("DO FACT SON!")
     if n == 0 then
         return 1
     else
@@ -15,7 +16,9 @@ function mymath.fact(n)
     table[2.5] = 3.0
     table[3] = {}
     table[3][0] = 100
-    table[3][1] = 101
+    table[3][1] = {}
+    table[3][1]["meow"] = "woof"
+    table[10] = mymath.dofact
     print(table)
 
     return table

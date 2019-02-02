@@ -57,6 +57,14 @@ int main(int argc, char** argv){
         std::string value_string = value;
         std::string value_type = lua_wrapper::to_string(value.get_type());
         std::cout << "TYPE: " << value_type << " KEY: " << key_string << " VAL: " << value_string << std::endl;;
+
+        if(value_type == "Lua Function")
+        {
+            value.call(1,4);
+            int result = luaState.getReturnValue();
+            std::cout << "Got a RET VALUE OF: " << result << std::endl;
+        }
+
     }
 
     return 0;
