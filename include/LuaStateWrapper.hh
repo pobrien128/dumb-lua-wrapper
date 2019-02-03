@@ -71,7 +71,7 @@ class LuaFunction
         LuaFunction()
         {}
 
-        LuaFunction(LuaStateWrapper* l, int ref)
+        LuaFunction(std::shared_ptr<LuaStateWrapper> l, int ref)
             :   m_luaState(l)
             ,   m_ref(ref)
         {
@@ -90,7 +90,7 @@ class LuaFunction
 
 
     private:
-        LuaStateWrapper* m_luaState;
+        std::weak_ptr<LuaStateWrapper> m_luaState;
         int m_ref;
 
 };
@@ -151,8 +151,6 @@ class LuaType
         {
             std::string l_serialized(l.make_hash());
             std::string r_serialized(r.make_hash());
-            std::cout << "HASH1: " << l_serialized << std::endl;
-            std::cout << "HASH2: " << r_serialized << std::endl;
             int ret = strcmp(l_serialized.c_str(), r_serialized.c_str());
             return ret < 0;
         }
@@ -247,7 +245,6 @@ class LuaType
 
         void call(const int& numRetValues)
         {
-            std::cout << "Expecting function type, have type: " << to_string(type) << std::endl;
             assert(type == LuaDatatype::lua_function);
             func->call(numRetValues);
         }
@@ -255,7 +252,6 @@ class LuaType
         template < typename ...Types > 
         void call(const int& numRetValues, Types ... args)
         {
-            std::cout << "Expecting function type, have type: " << to_string(type) << std::endl;
             assert(type == LuaDatatype::lua_function);
             func->call(numRetValues, args...);
         }
@@ -281,7 +277,7 @@ class LuaTable: public std::map<LuaType, LuaType>
 };
 
 
-class LuaStateWrapper
+class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
 {
     public:
         LuaStateWrapper()
@@ -302,6 +298,7 @@ class LuaStateWrapper
         {
             if(m_owningInstance)
                 lua_close(m_luaState);
+
         }
 
         void openLibs()
@@ -311,7 +308,6 @@ class LuaStateWrapper
 
         void loadModule(const std::string& filename, const std::string modulename)
         { 
-            std::cout << "Loading module " << modulename << " from file; " << filename << std::endl;
             int status = luaL_dofile(m_luaState, filename.c_str());
             assert(status == 0);
             lua_setglobal(m_luaState, modulename.c_str());
@@ -323,9 +319,7 @@ class LuaStateWrapper
         {
             lua_getglobal(m_luaState, module.c_str());
             lua_getfield(m_luaState, -1, funcName.c_str());
-            std::cout << "About to push arguments on the stack" << std::endl;
             pushArguments(args...);
-            std::cout << "Done pushing arguments, about to call " << funcName << " with " << m_numArgs << " arguments and " << numRetValues << " return values." <<  std::endl;
             lua_call(m_luaState, m_numArgs, numRetValues); 
             m_numArgs = 0;
         }
@@ -506,7 +500,7 @@ class LuaStateWrapper
             assert(lua_isfunction(m_luaState, -1));
             lua_pushvalue(m_luaState, -1);
             int ref = luaL_ref(m_luaState, LUA_REGISTRYINDEX);
-            f.reset(new LuaFunction(this, ref));
+            f.reset(new LuaFunction(shared_from_this(), ref));
         }
 
         template< typename T, typename... Types >
@@ -558,17 +552,23 @@ static std::string to_string(const LuaTable& table){
 template < typename ...Types > 
 void LuaFunction::call(const int& numRetValues, Types ... args)
 {
-    m_luaState->callFunction(m_ref, numRetValues, args...);
+    std::shared_ptr<LuaStateWrapper> strongLuaState = m_luaState.lock();
+    if(strongLuaState)
+        strongLuaState->callFunction(m_ref, numRetValues, args...);
 }
 
 void LuaFunction::call(const int& numRetValues)
 {
-    m_luaState->callFunction(m_ref, numRetValues);
+    std::shared_ptr<LuaStateWrapper> strongLuaState = m_luaState.lock();
+    if(strongLuaState)
+        strongLuaState->callFunction(m_ref, numRetValues);
 }
 
 LuaFunction::~LuaFunction()
 {
-    m_luaState->removeReferenceFromRegistry(m_ref);
+    std::shared_ptr<LuaStateWrapper> strongLuaState = m_luaState.lock();
+    if(strongLuaState)
+        strongLuaState->removeReferenceFromRegistry(m_ref);
 }
 
 

@@ -3,45 +3,50 @@
 #include <cassert>
 #include <LuaStateWrapper.hh>
 
+#include <memory>
+
 int test(lua_State *L)
 {
-    lua_wrapper::LuaStateWrapper lua_wrapper(L);
-    std::cout << "Number of items on lua stack: " << lua_wrapper.getNumItemsOnStack() << std::endl;
+    std::shared_ptr<lua_wrapper::LuaStateWrapper> lua_wrapper(new lua_wrapper::LuaStateWrapper(L));
+    std::cout << "Number of items on lua stack: " << lua_wrapper->getNumItemsOnStack() << std::endl;
 
-    int arg = lua_wrapper.getArgument<int>();
+    int arg = lua_wrapper->getArgument<int>();
     std::cout << "TEST " << arg << std::endl;
 
 }
 
 int main(int argc, char** argv){
 
-    lua_wrapper::LuaStateWrapper luaState;
+    std::shared_ptr<lua_wrapper::LuaStateWrapper> luaState = std::make_shared<lua_wrapper::LuaStateWrapper>();
     std::cout << "Num Items remaining on stack: " <<
-                luaState.getNumItemsOnStack() << std::endl;
+                luaState->getNumItemsOnStack() << std::endl;
     std::cout << "Opening standard libs" << std::endl;
-    luaState.openLibs();
+    luaState->openLibs();
     std::cout << "Num Items remaining on stack: " <<
-                luaState.getNumItemsOnStack() << std::endl;
-    luaState.loadModule("script/lua_test.lua", "mymath");
+                luaState->getNumItemsOnStack() << std::endl;
+    luaState->loadModule("script/lua_test.lua", "mymath");
     std::cout << "Num Items remaining on stack: " <<
-                luaState.getNumItemsOnStack() << std::endl;
-    luaState.callFunction("mymath", "fact", 1, 5);
+                luaState->getNumItemsOnStack() << std::endl;
+    std::cout << "HERE" << std::endl;
+    luaState->callFunction("mymath", "fact", 1, 5);
+    std::cout << "HERE2" << std::endl;
     std::cout << "Num Items remaining on stack: " <<
-                luaState.getNumItemsOnStack() << std::endl;
+                luaState->getNumItemsOnStack() << std::endl;
 
-    lua_wrapper::LuaTable result = luaState.getReturnValue();
+    std::cout << "HERE3" << std::endl;
+    lua_wrapper::LuaTable result = luaState->getReturnValue();
     //std::cout << "Result: " << result << std::endl;
 
     std::cout << "Num Items remaining on stack: " <<
-                luaState.getNumItemsOnStack() << std::endl;
+                luaState->getNumItemsOnStack() << std::endl;
 
-    luaState.registerFunction("test", test);
-    luaState.loadModule("script/lua_import.lua", "func_test");
-    luaState.callFunction("func_test", "test", 0);
+    luaState->registerFunction("test", test);
+    luaState->loadModule("script/lua_import.lua", "func_test");
+    luaState->callFunction("func_test", "test", 0);
 
     std::cout << "Num Items remaining on stack: " <<
-                luaState.getNumItemsOnStack() << std::endl;
-    std::cout << "Type of item on stack: " << luaState.getTopStackItemType() << std::endl;
+                luaState->getNumItemsOnStack() << std::endl;
+    std::cout << "Type of item on stack: " << luaState->getTopStackItemType() << std::endl;
 
     lua_wrapper::LuaTable table;
     table["foo"] = 1;
@@ -65,7 +70,7 @@ int main(int argc, char** argv){
     auto test = result.get("notakey");
 
     result["func"].call(1,6);
-    int retVal = luaState.getReturnValue();
+    int retVal = luaState->getReturnValue();
     std::cout << "Got a RET VALUE OF: " << retVal << std::endl;
 
     return 0;

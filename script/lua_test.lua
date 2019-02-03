@@ -10,18 +10,21 @@ function mymath.dofact(n)
 end
 
 function mymath.fact(n)
-    table = {}
-    table['test'] = 3
-    table[2] = 1
-    table[2.5] = 3.0
-    table[3] = {}
-    table[3][0] = 100
-    table[3][1] = {}
-    table[3][1]["meow"] = "woof"
-    table["func"] = mymath.dofact
-    print(table)
+    local my_table = {}
+    my_table['test'] = 3
+    my_table[2] = 1
+    my_table[2.5] = 3.0
+    my_table[3] = {}
+    my_table[3][0] = 100
+    my_table[3][1] = {}
+    my_table[3][1]["meow"] = "woof"
 
-    return table
+    function my_table.func (self)
+        self[10] = 1
+        return 1
+    end
+
+    return my_table
 end
 
 return mymath
