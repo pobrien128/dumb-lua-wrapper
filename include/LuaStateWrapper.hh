@@ -1,6 +1,9 @@
 #ifndef LUA_STATE_WRAPPER_HEADER
 #define LUA_STATE_WRAPPER_HEADER
 
+//LuaStateWrapper
+#include <LuaCppExtensions.hh>
+
 //LUA
 #include <lua.hpp>
 
@@ -34,6 +37,7 @@ enum class LuaDatatype
     lua_string,
     lua_table,
     lua_function,
+    lua_cfunction,
     lua_undefined
 };
 
@@ -58,6 +62,9 @@ static std::string to_string(LuaDatatype type){
             break;
         case LuaDatatype::lua_function:
             return "Lua Function";
+            break;
+        case LuaDatatype::lua_cfunction:
+            return "Lua C Function";
             break;
         default:
             return "Undefined";
@@ -144,6 +151,12 @@ class LuaType
             type = LuaDatatype::lua_function;
         }
 
+        LuaType(const LuaCppFunction& f)
+        {
+            cfunc = f;
+            type = LuaDatatype::lua_cfunction;
+        }
+
         ~LuaType();
 
         //Strictly used by stl containers
@@ -195,6 +208,8 @@ class LuaType
                 return to_string(*t);
             } else if (type == LuaDatatype::lua_function) {
                 return std::to_string(func->get_reference());
+            } else if (type == LuaDatatype::lua_cfunction) {
+                return cfunc.target_type().name();
             }
         }
 
@@ -220,6 +235,8 @@ class LuaType
                 case LuaDatatype::lua_function:
                     streamer << func->get_reference();
                     break;
+                case LuaDatatype::lua_cfunction:
+                    streamer << cfunc.target_type().name(); 
             }
             return streamer.str();
         }
@@ -238,8 +255,20 @@ class LuaType
         }
 
         operator LuaTable() const;
+        operator std::shared_ptr<LuaFunction>() const
+        {
+            assert(type == LuaDatatype::lua_function);
+            return func;
+        }
 
-        LuaDatatype get_type(){
+        operator LuaCppFunction() const
+        {
+            std::cout << to_string(type) << std::endl;
+            assert(type == LuaDatatype::lua_cfunction);
+            return cfunc;
+        }
+
+        LuaDatatype get_type() const{
             return type;
         }
 
@@ -261,6 +290,7 @@ class LuaType
         std::string s;
         std::shared_ptr<LuaTable> t;
         std::shared_ptr<LuaFunction> func;
+        LuaCppFunction cfunc;
         LuaDatatype type;
 
 };
@@ -285,6 +315,7 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
             ,   m_numArgs(0)
             ,   m_owningInstance(true)
         {
+            registerCppFunctionMetatable();
         }
 
         LuaStateWrapper(lua_State* luaState)
@@ -292,6 +323,7 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
             ,  m_numArgs(0)
             ,  m_owningInstance(false)
         {
+            registerCppFunctionMetatable();
         }
 
         ~LuaStateWrapper()
@@ -320,6 +352,7 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
             lua_getglobal(m_luaState, module.c_str());
             lua_getfield(m_luaState, -1, funcName.c_str());
             pushArguments(args...);
+            std::cout << "Caling function " << funcName << " with " << m_numArgs << " args and " << numRetValues << " return values." << std::endl;
             lua_call(m_luaState, m_numArgs, numRetValues); 
             m_numArgs = 0;
         }
@@ -384,6 +417,8 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
                 return "STRING";
            else if(lua_istable(m_luaState, -1))
                 return "TABLE";
+           else if(lua_iscppfunction(m_luaState, -1))
+               return "CPP_FUNCTION";
            else
                return "UNKNOWN";
         }
@@ -400,6 +435,11 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
         void pushArguments(Types ... args)
         {
             pushArgument(args...);
+        }
+
+        lua_State* getLuaState()
+        {
+            return m_luaState;
         }
 
     private:
@@ -420,6 +460,12 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
         {
             assert(lua_isnumber(m_luaState, -1));
             retVal = (double)lua_tonumber(m_luaState, -1);
+        }
+
+        void _getArgument(std::string& retVal)
+        {
+            assert(lua_isstring(m_luaState, -1));
+            retVal = std::string(lua_tostring(m_luaState,-1));
         }
 
         void _getReturnValue(LuaType& retVal)
@@ -449,6 +495,14 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
                 std::shared_ptr<LuaFunction> f;
                 _getReturnValue(f);
                 retVal = f;
+            } else if (lua_iscppfunction(m_luaState, -1)){
+                std::cout << "Reading in a cpp function" << std::endl;
+                LuaCppFunction f;
+                _getReturnValue(f);
+                std::cout << "Incremental check: " << f.target_type().name() << std::endl;
+                retVal = f;
+            } else {
+                assert(false);
             }
         }
 
@@ -503,23 +557,134 @@ class LuaStateWrapper: public std::enable_shared_from_this<LuaStateWrapper>
             f.reset(new LuaFunction(shared_from_this(), ref));
         }
 
+        void _getReturnValue(LuaCppFunction& f)
+        {
+            assert(lua_iscppfunction(m_luaState, -1));
+            void* funcPtr = luaL_testudata(m_luaState, -1, cpp_function);
+            if(funcPtr)
+            {
+                f = *static_cast<LuaCppFunction *> (funcPtr);
+            } else {
+                assert(false);
+            }
+
+        }
+
+        void incrementArgCount(bool nested){
+            if(!nested)
+                m_numArgs++;
+        }
+
         template< typename T, typename... Types >
         void pushArgument(T t, Types... args )
         {
             pushArgument(t);
             pushArgument(args...);
         }
-        void pushArgument(const int& arg){
-            m_numArgs++;
+        void pushArgument(const int& arg, bool nested = false){
+            incrementArgCount(nested);
             lua_pushnumber(m_luaState, arg);
         }
-        void pushArgument(const float& arg){
-            m_numArgs++;
+        void pushArgument(const float& arg, bool nested = false){
+            incrementArgCount(nested);
             lua_pushnumber(m_luaState, arg);
         }
-        void pushArgument(const double& arg){
-            m_numArgs++;
+        void pushArgument(const double& arg, bool nested = false){
+            incrementArgCount(nested);
             lua_pushnumber(m_luaState, arg);
+        }
+
+        void pushArgument(const std::string& arg, bool nested = false)
+        {
+            incrementArgCount(nested);
+            lua_pushstring(m_luaState, arg.c_str());
+        }
+
+        void pushArgument(const LuaTable& arg, bool nested = false)
+        {
+            std::cout << "PUSHING TABLE TO THE STACK!" << std::endl;
+            incrementArgCount(nested);
+            lua_newtable(m_luaState);
+            for(auto iter = arg.begin(); iter!= arg.end(); iter++)
+            {
+                const auto& key = iter->first;
+                const auto& val = iter->second;
+                deduceAndPushArgument(key);
+                deduceAndPushArgument(val);
+                lua_settable(m_luaState, -3);
+            }
+        }
+
+        void pushArgument(std::shared_ptr<LuaFunction> func, bool nested = false)
+        {
+           incrementArgCount(nested);
+           lua_rawgeti(m_luaState, LUA_REGISTRYINDEX, func->get_reference()); 
+        }
+
+        void pushArgument(LuaCppFunction cfunc, bool nested = false)
+        {
+            incrementArgCount(nested);
+            void* p = lua_newuserdata(m_luaState, sizeof(LuaCppFunction));    
+            luaL_setmetatable(m_luaState, cpp_function);
+            new (p) LuaCppFunction(cfunc);
+        }
+
+        void deduceAndPushArgument(const LuaType& arg)
+        {
+            switch(arg.get_type()){
+                case LuaDatatype::lua_double:
+                {
+                    double d = arg;
+                    pushArgument(d, true);
+                    break;
+                }
+                case LuaDatatype::lua_float:
+                {
+                    float f = arg;
+                    pushArgument(f, true);
+                    break;
+                }
+                case LuaDatatype::lua_int:
+                {
+                    int i = arg;
+                    pushArgument(i, true);
+                    break;
+                }
+                case LuaDatatype::lua_string:
+                {
+                    std::string s = arg;
+                    pushArgument(s, true);
+                    break;
+                }
+                case LuaDatatype::lua_table:
+                {
+                    LuaTable t = arg;
+                    pushArgument(t, true);
+                    break;
+                }
+                case LuaDatatype::lua_function:
+                {
+                    std::shared_ptr<LuaFunction> f = arg;
+                    pushArgument(f, true);
+                    break;
+                }
+            }
+
+        }
+
+        void registerCppFunctionMetatable(){
+            std::cout << "Registering CPP Function Metatable" << std::endl;
+            luaL_newmetatable(m_luaState, cpp_function);
+            lua_pushcfunction(m_luaState, functionDispatcher);
+            lua_setfield(m_luaState, -2, "__call");
+            lua_pushcfunction(m_luaState, functionCleanup);
+            lua_setfield(m_luaState, -2, "__gc");
+            lua_pushcfunction(m_luaState, functionToString);
+            lua_setfield(m_luaState, -2, "__tostring");
+            lua_pushvalue(m_luaState, -1);
+            lua_setfield(m_luaState, -2, "__index");
+
+            lua_pop(m_luaState, 1);
         }
 
 
@@ -596,6 +761,9 @@ LuaType::LuaType(const LuaType& rtype)
         case LuaDatatype::lua_function:
             func = rtype.func;
             break;
+        case LuaDatatype::lua_cfunction:
+            cfunc = rtype.cfunc;
+            break;
     }
 }
 
@@ -621,6 +789,9 @@ LuaType& LuaType::operator=(const LuaType& rtype)
             break;
         case LuaDatatype::lua_function:
             func = rtype.func;
+            break;
+        case LuaDatatype::lua_cfunction:
+            cfunc = rtype.cfunc;
             break;
     }
     return *this;
